@@ -1,0 +1,10 @@
+[package]
+name = "bundlion"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+swc_ecma_parser = "0.104.0"
+swc_common = { version = "0.18.0", features = ["tty-emitter"] }
