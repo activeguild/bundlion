@@ -1,4 +1,7 @@
+use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use swc_common::sync::Lrc;
@@ -9,11 +12,11 @@ use swc_common::{
 
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 
-#[derive(Debug, Eq, Hash, PartialEq)]
+#[derive(Debug, Eq)]
 struct Module {
     id: usize,
     path_name: PathBuf,
-    ast: swc_ecma_ast::Module,
+    ast: Option<swc_ecma_ast::Module>,
 }
 
 impl Module {
@@ -26,15 +29,31 @@ impl Module {
     }
 }
 
-fn main() {
-    let path = Path::new("./samples/entry.js").to_path_buf();
-    let modules_map = traverse(path, &HashSet::new());
-
-    println!("modules_map:{:?}", modules_map);
+impl Hash for Module {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.path_name.hash(hasher);
+    }
 }
 
-fn traverse(path: PathBuf, parent_modules_map: &HashSet<Module>) -> HashSet<Module> {
-    let mut modules_map: HashSet<Module> = HashSet::new();
+impl PartialEq for Module {
+    fn eq(&self, other: &Self) -> bool {
+        self.path_name_as_str() == other.path_name_as_str()
+    }
+}
+
+impl PartialOrd for Module {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.id.partial_cmp(&other.id)
+    }
+}
+
+fn main() {
+    let path = Path::new("./samples/entry.js").to_path_buf();
+    let modules_map = &mut HashSet::new();
+    traverse(path, modules_map);
+}
+
+fn traverse(path: PathBuf, modules_map: &mut HashSet<Module>) {
     let cm: Lrc<SourceMap> = Default::default();
     let handler = Handler::with_tty_emitter(ColorConfig::Auto, true, false, Some(cm.clone()));
 
@@ -63,14 +82,14 @@ fn traverse(path: PathBuf, parent_modules_map: &HashSet<Module>) -> HashSet<Modu
         })
         .expect("failed to parser module");
 
-    modules_map.insert(Module {
-        id: modules_map.len(),
-        path_name: path.clone(),
-        ast: module.clone(),
-    });
-
     let mut base_path = path.clone();
     base_path.pop();
+
+    modules_map.insert(Module {
+        id: modules_map.len(),
+        path_name: fs::canonicalize(&path.clone()).unwrap(),
+        ast: Some(module.clone()),
+    });
 
     for module_item in module.body {
         match module_item {
@@ -105,10 +124,13 @@ fn traverse(path: PathBuf, parent_modules_map: &HashSet<Module>) -> HashSet<Modu
                                             let final_path_name =
                                                 get_path_name(base_path.clone(), module_name);
 
-                                            modules_map.extend(traverse(
-                                                final_path_name,
-                                                parent_modules_map,
-                                            ));
+                                            if !modules_map.contains(&Module {
+                                                id: 0,
+                                                path_name: final_path_name.clone(),
+                                                ast: None,
+                                            }) {
+                                                traverse(final_path_name, modules_map);
+                                            }
                                         }
                                     }
                                     _ => (),
@@ -123,8 +145,6 @@ fn traverse(path: PathBuf, parent_modules_map: &HashSet<Module>) -> HashSet<Modu
             _ => (),
         }
     }
-
-    modules_map
 }
 
 fn get_path_name(mut base_path: PathBuf, file_name: String) -> PathBuf {
@@ -162,7 +182,11 @@ mod tests {
     #[test]
     fn main_01() {
         let path = Path::new("./samples/entry.js").to_path_buf();
-        let module_map = traverse(path, &HashSet::new());
-        println!("module_map:{:?}", module_map);
+        let module_map = &mut HashSet::new();
+        traverse(path, module_map);
+        assert_eq!(2, module_map.len());
+        for (index, item) in module_map.iter().enumerate() {
+            assert_eq!(index, item.id);
+        }
     }
 }
