@@ -6,11 +6,13 @@ use std::path::{Path, PathBuf};
 
 use swc_common::sync::Lrc;
 use swc_common::{
+    comments::SingleThreadedComments,
     errors::{ColorConfig, Handler},
     SourceMap,
 };
 
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
+use swc_ecma_dep_graph::{analyze_dependencies};
 
 #[derive(Debug, Eq)]
 struct Module {
@@ -74,6 +76,7 @@ fn traverse(path: PathBuf, modules_map: &mut HashSet<Module>) {
     for e in parser.take_errors() {
         e.into_diagnostic(&handler).emit();
     }
+    
     let module = parser
         .parse_module()
         .map_err(|mut e| {
@@ -90,6 +93,9 @@ fn traverse(path: PathBuf, modules_map: &mut HashSet<Module>) {
         path_name: fs::canonicalize(&path.clone()).unwrap(),
         ast: Some(module.clone()),
     });
+
+    // I'm going to keep it simple here.
+    // let dependencies = analyze_dependencies(&module.clone(),&SingleThreadedComments::default());
 
     for module_item in module.body {
         match module_item {
