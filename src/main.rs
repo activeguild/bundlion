@@ -10,9 +10,10 @@ use swc_common::{
     errors::{ColorConfig, Handler},
     SourceMap,
 };
-
+use swc_atoms::{js_word, JsWord};
+use swc_ecma_dep_graph::analyze_dependencies;
+use swc_ecma_minifier::{optimize,option::{MinifyOptions,ExtraOptions}};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
-use swc_ecma_dep_graph::{analyze_dependencies};
 
 #[derive(Debug, Eq)]
 struct Module {
@@ -29,6 +30,11 @@ impl Module {
             .into_string()
             .unwrap()
     }
+    // fn minify_ast(&self) -> Module{
+    //     let cm: Lrc<SourceMap> = Default::default();
+    //     let comments = &SingleThreadedComments::default();
+    //     optimize(self.ast.unwrap(),cm,comments,None,&MinifyOptions::default(),&ExtraOptions::default())
+    // }
 }
 
 impl Hash for Module {
@@ -76,7 +82,7 @@ fn traverse(path: PathBuf, modules_map: &mut HashSet<Module>) {
     for e in parser.take_errors() {
         e.into_diagnostic(&handler).emit();
     }
-    
+
     let module = parser
         .parse_module()
         .map_err(|mut e| {
@@ -120,7 +126,7 @@ fn traverse(path: PathBuf, modules_map: &mut HashSet<Module>) {
                                             let args = call.args[0].clone();
                                             let module_name = match *args.expr {
                                                 swc_ecma_ast::Expr::Lit(lit) => match lit {
-                                                    swc_ecma_ast::Lit::Str(str) => {
+                                                    swc_ecma_ast::Lit::Str(mut str) => {
                                                         str.value.to_string()
                                                     }
                                                     _ => "".to_string(),
@@ -130,11 +136,13 @@ fn traverse(path: PathBuf, modules_map: &mut HashSet<Module>) {
                                             let final_path_name =
                                                 get_path_name(base_path.clone(), module_name);
 
-                                            if !modules_map.contains(&Module {
+                                            let target_module = Module {
                                                 id: 0,
                                                 path_name: final_path_name.clone(),
                                                 ast: None,
-                                            }) {
+                                            };
+
+                                            if !modules_map.contains(&target_module) {
                                                 traverse(final_path_name, modules_map);
                                             }
                                         }
@@ -178,6 +186,46 @@ fn get_file_name(mut file_name: String) -> String {
 
 fn is_node_module(file_name: &str) -> bool {
     !file_name.starts_with(".")
+}
+
+fn use_modules_template(modules_map: &mut HashSet<Module>) -> String {
+    r#"((modules) => {
+        const usedModules = {};
+      
+        function require(moduleId) {
+          if (usedModules[moduleId]) {
+            return usedModules[moduleId].exports;
+          }
+      
+          const module = (usedModules[moduleId] = {
+            exports: {},
+          });
+      
+          modules[moduleId](module, module.exports, require);
+      
+          return module.exports;
+        }
+      
+        return require(0);
+      })({
+        0: function (module, exports, require) {
+          const m = require(1);
+      
+          m('from entry.js');
+        },
+        1: function (module, exports, require) {
+          function m(txt) {
+            console.log('module', txt);
+          }
+      
+          module.exports = m;
+        },
+      });"#
+        .to_string()
+}
+
+fn use_module_template(module: Module) -> String {
+    "".to_string()
 }
 
 #[cfg(test)]
